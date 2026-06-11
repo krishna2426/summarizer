@@ -1,86 +1,143 @@
 # AI Project State Explorer & Summarizer
 
-An intelligent command-line utility that processes large conversational exports from major AI assistants (including Claude, ChatGPT, and Google Takeout Gemini). It leverages LLM APIs to distill chaotic chat histories into highly structured, actionable project tracking blueprints (`.md`).
+> A command-line utility that converts messy AI chat exports into clean, structured project-state Markdown files — so you never lose development context again.
 
-This tool prevents development discontinuity by helping you immediately resume active programming workflows with clear context, milestones, and blockers.
+Supports exports from **Claude**, **ChatGPT**, and **Google Takeout (Gemini)**. Powered by `gemini-2.5-flash` with a pluggable backend architecture ready for OpenAI, Anthropic, and Ollama.
+
+---
 
 ## Features
 
-- **Robust CLI & Interactive Modes:** Run fully automated via command-line flags (`argparse`), or fall back to an intuitive interactive terminal menu.
-- **Deep Recursive Parsing:** Automatically bypasses structural noise, platform database metadata, timestamps, and long UUID strings to isolate real human dialog.
-- **Google Takeout Normalization:** Automatically intercepts flat, disconnected Gemini prompt export objects and groups them chronologically by date into cohesive "sessions."
-- **Multi-Backend Architecture:** Native support for `gemini-2.5-flash`, with an extensible dispatcher ready for OpenAI, Anthropic, or local Ollama integrations.
-- **Anti-Overwrite Protection:** Generates unique, timestamped markdown files into customizable output directories to ensure historical records are preserved.
+- **CLI & Interactive Modes** — Run headless via flags for automation, or use the guided terminal menu with no arguments.
+- **Deep Recursive Parsing** — Strips UUIDs, timestamps, image markers, and platform metadata to isolate real human dialogue.
+- **Google Takeout Normalization** — Rebuilds flat, disconnected Gemini prompt exports into chronological sessions.
+- **Multi-Format Support** — Auto-detects ChatGPT node-graph, Claude flat array, generic `messages`, and legacy `history` schemas.
+- **Multi-Backend Architecture** — Native Gemini support with stubs ready for OpenAI, Anthropic, and Ollama.
+- **Anti-Overwrite Protection** — Timestamped output filenames written into a configurable directory.
 
-## Project State Architecture
+---
 
-The generated markdown states follow a strict blueprint optimized for developer handoffs or model context initialization:
+## Generated Output Structure
 
-- **# Project Overview** (Goals & Tech Stack)
-- **# Current State** (Working Milestones & Known Blockers)
-- **# Established Rules & Constraints** (Formatting Rules & Architectural Decisions)
-- **# Next Immediate Task**
+Every state file follows this strict blueprint, optimized for developer handoffs and model context initialization:
+
+```
+# Project Overview
+* Goal / Tech Stack
+
+# Current State
+* Working Milestones / Known Blockers
+
+# Established Rules & Constraints
+* Formatting Rules / Architectural Decisions
+
+# Next Immediate Task
+```
+
+---
+
+## Requirements
+
+- Python **3.8+**
+- A valid **Gemini API key** (free tier works)
+
+---
 
 ## Installation
 
-1. **Clone the repository:**
-   ```bash
-   git clone [https://github.com/YOUR_USERNAME/your-repo-name.git](https://github.com/YOUR_USERNAME/your-repo-name.git)
-   cd your-repo-name
-
+**1. Clone the repository:**
+```bash
+git clone https://github.com/krishna2426/summarizer.git
+cd summarizer
 ```
 
-2. **Install the dependencies:**
-Ensure you are using Python 3, then install the packages from the requirements file:
+**2. Install dependencies:**
 ```bash
 pip install -r requirements.txt
-
 ```
 
+**3. Set your API key as an environment variable:**
 
-3. **Set your Environment Variable:**
-The script requires your Gemini API key to operate.
-* **Linux/macOS:** `export GEMINI_API_KEY="your_api_key_here"`
-* **Windows (CMD):** `set GEMINI_API_KEY=your_api_key_here`
-* **Windows (PowerShell):** `$env:GEMINI_API_KEY="your_api_key_here"`
+| Platform | Command |
+|---|---|
+| Linux / macOS | `export GEMINI_API_KEY="your_api_key_here"` |
+| Windows (CMD) | `set GEMINI_API_KEY=your_api_key_here` |
+| Windows (PowerShell) | `$env:GEMINI_API_KEY="your_api_key_here"` |
 
+---
 
+## Usage
 
-## 💻 Usage
+### Interactive Mode
 
-### 1. Interactive Mode
-
-If you run the script without any arguments, it will automatically scan your directory for `.json` files and launch an interactive menu:
+Run without arguments to scan your directory for `.json` files and launch the guided menu:
 
 ```bash
 python summarizer.py
-
 ```
 
-### 2. Command-Line (Headless) Mode
+You'll be prompted to:
+1. Select a detected JSON file (or enter a custom path)
+2. Browse recent chats or search by keyword
+3. Pick a conversation to summarize
 
-You can bypass the menus entirely by passing arguments directly. This is ideal for scripting or automation.
+The output is saved automatically to the `project_states/` directory.
+
+---
+
+### CLI / Headless Mode
+
+Pass flags directly to skip all menus — useful for scripting and automation:
 
 ```bash
-python summarizer.py --file my_export.json --output-dir ./project_states --provider gemini
-
+python summarizer.py --file my_export.json --output-dir ./states --provider gemini
 ```
 
-**Available Flags:**
+**Available flags:**
 
-* `-f`, `--file` : Path to your target chat export JSON file.
-* `-o`, `--output-dir` : Directory path to save the generated Markdown files (Defaults to `project_states`).
-* `-p`, `--provider` : LLM backend choice (`gemini` [default], `openai`, `anthropic`, `ollama`).
-* `-v`, `--version` : Displays the current script version.
+| Flag | Short | Description | Default |
+|---|---|---|---|
+| `--file` | `-f` | Path to the chat export JSON | *(interactive)* |
+| `--output-dir` | `-o` | Directory for generated Markdown files | `project_states` |
+| `--provider` | `-p` | LLM backend: `gemini`, `openai`, `anthropic`, `ollama` | `gemini` |
+| `--version` | `-v` | Print the current version and exit | — |
+
+---
 
 ## Supported Export Formats
 
-* **Claude (.json):** Native support for `chat_messages` arrays.
-* **ChatGPT (.json):** Native support for nested `mapping` node structures.
-* **Google Takeout / Gemini (.json):** Specialized timeline interceptor to rebuild sessions from isolated prompt logs.
-* **Generic LLM JSON:** Recursive fallback scraper that digs for generic `messages` or `content` keys.
+| Platform | Format | Key |
+|---|---|---|
+| **Claude** | Flat message array | `chat_messages` + `sender` / `text` |
+| **ChatGPT** | Node graph | `mapping` + `author.role` / `content.parts` |
+| **Google Takeout (Gemini)** | Flat prompt objects | Grouped by `time` into date sessions |
+| **Generic / Legacy** | Standard array | `messages` + `role` / `content` |
+| **Legacy History** | History array | `history` + `author_role` / `text_body` |
+
+---
+
+## Adding a New LLM Backend
+
+The `call_llm_backend()` function in `summarizer.py` is designed to be extended. To add a new provider:
+
+1. Uncomment the relevant package in `requirements.txt` and install it
+2. Add an `elif provider.lower() == "yourprovider":` branch in `call_llm_backend()`
+3. Pass `--provider yourprovider` at runtime
+
+---
+
+## Architecture Evolution
+
+| Version | Changes |
+|---|---|
+| v1–v3 | Deep nesting resolution, image payload filtering, UUID rejection |
+| v4 | Dynamic filesystem scanning |
+| v5 | Google Takeout timeline grouping, timestamped file preservation |
+| v1.2.0 | `argparse` CLI, `--output-dir`, multi-backend dispatcher, improved Takeout detection |
+| **v1.3.0** | Cached Gemini client, restored `history` format, fixed `%(prog)s`, prompt formatting fix, `'q'`/`'b'` navigation, custom path retry loop |
+
+---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
-
+This project is licensed under the [MIT License](LICENSE).
