@@ -1,16 +1,16 @@
 # AI Project State Explorer & Summarizer
 
-An intelligent command-line utility that processes large conversational exports from major AI assistants (including Claude, ChatGPT, and Google Takeout Gemini) and leverages the Gemini API to distill them into structured project tracking blueprints (`.md`).
+An intelligent command-line utility that processes large conversational exports from major AI assistants (including Claude, ChatGPT, and Google Takeout Gemini). It leverages LLM APIs to distill chaotic chat histories into highly structured, actionable project tracking blueprints (`.md`).
 
 This tool prevents development discontinuity by helping you immediately resume active programming workflows with clear context, milestones, and blockers.
 
 ## Features
 
+- **Robust CLI & Interactive Modes:** Run fully automated via command-line flags (`argparse`), or fall back to an intuitive interactive terminal menu.
 - **Deep Recursive Parsing:** Automatically bypasses structural noise, platform database metadata, timestamps, and long UUID strings to isolate real human dialog.
-- **Google Takeout Normalization:** Automatically intercepts flat, disconnected Gemini prompt export objects, groups them chronologically by date into cohesive "sessions," and enables the AI to reverse-engineer project states purely from your inputs.
-- **Dynamic File Discovery:** Scans your working directory automatically for available `.json` files, offering an interactive list-based CLI selection menu.
-- **Anti-Overwrite Protection:** Generates unique, timestamped markdown files using the source name and sanitized conversation title to ensure historical records are preserved.
-- **Context-Optimized Token Management:** Strips image references and system junk locally *before* transmission to keep API input context efficient without truncating technical depth.
+- **Google Takeout Normalization:** Automatically intercepts flat, disconnected Gemini prompt export objects and groups them chronologically by date into cohesive "sessions."
+- **Multi-Backend Architecture:** Native support for `gemini-2.5-flash`, with an extensible dispatcher ready for OpenAI, Anthropic, or local Ollama integrations.
+- **Anti-Overwrite Protection:** Generates unique, timestamped markdown files into customizable output directories to ensure historical records are preserved.
 
 ## Project State Architecture
 
@@ -30,66 +30,57 @@ The generated markdown states follow a strict blueprint optimized for developer 
 
 ```
 
-2. **Install the required Google GenAI SDK:**
+2. **Install the dependencies:**
+Ensure you are using Python 3, then install the packages from the requirements file:
 ```bash
-pip install google-genai
+pip install -r requirements.txt
 
 ```
 
 
+3. **Set your Environment Variable:**
+The script requires your Gemini API key to operate.
+* **Linux/macOS:** `export GEMINI_API_KEY="your_api_key_here"`
+* **Windows (CMD):** `set GEMINI_API_KEY=your_api_key_here`
+* **Windows (PowerShell):** `$env:GEMINI_API_KEY="your_api_key_here"`
 
-## Configuration
 
-The script relies on the official Google GenAI SDK. You must expose your Gemini API key as an environment variable before execution.
 
-**On Linux/macOS:**
+## 💻 Usage
 
-```bash
-export GEMINI_API_KEY="your_api_key_here"
+### 1. Interactive Mode
 
-```
+If you run the script without any arguments, it will automatically scan your directory for `.json` files and launch an interactive menu:
 
-**On Windows (Command Prompt):**
-
-```cmd
-set GEMINI_API_KEY=your_api_key_here
-
-```
-
-**On Windows (PowerShell):**
-
-```powershell
-$env:GEMINI_API_KEY="your_api_key_here"
-
-```
-
-## Usage
-
-1. Place your exported conversation JSON files (e.g., Claude `conversations.json` or your Google Takeout archive) into the project folder.
-2. Run the main processing script:
 ```bash
 python summarizer.py
 
 ```
 
+### 2. Command-Line (Headless) Mode
 
-3. Use the interactive menu to:
-* Select an automatically detected JSON file (or provide a custom path).
-* Choose whether to view recent logs or search across your chat archive using technical keywords (e.g., "Subway", "parser", "API").
-* Select the conversation index to analyze.
+You can bypass the menus entirely by passing arguments directly. This is ideal for scripting or automation.
 
+```bash
+python summarizer.py --file my_export.json --output-dir ./project_states --provider gemini
 
-4. The script will securely handle the parsing and write a highly detailed state file named like:
-`[source_file]_[sanitized_title]_[HHMMSS].md`
+```
 
-## Architecture Evolution
+**Available Flags:**
 
-This utility evolved over several versions to handle the distinct real-world quirks of platform logs:
+* `-f`, `--file` : Path to your target chat export JSON file.
+* `-o`, `--output-dir` : Directory path to save the generated Markdown files (Defaults to `project_states`).
+* `-p`, `--provider` : LLM backend choice (`gemini` [default], `openai`, `anthropic`, `ollama`).
+* `-v`, `--version` : Displays the current script version.
 
-* **v1 - v3:** Resolved deep nesting challenges, filtered image payload markers, and added filtering to reject UUID hashes.
-* **v4:** Added dynamic filesystem scanning utilities.
-* **v5 (Current):** Engineered the timeline grouping pipeline for model-less Google Takeout archives and added dynamic timestamp file preservation.
+## Supported Export Formats
+
+* **Claude (.json):** Native support for `chat_messages` arrays.
+* **ChatGPT (.json):** Native support for nested `mapping` node structures.
+* **Google Takeout / Gemini (.json):** Specialized timeline interceptor to rebuild sessions from isolated prompt logs.
+* **Generic LLM JSON:** Recursive fallback scraper that digs for generic `messages` or `content` keys.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
+
