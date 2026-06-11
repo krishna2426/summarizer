@@ -15,10 +15,7 @@ except Exception as e:
 def select_json_file():
     """Scans the current directory for JSON files and lets the user pick one."""
     json_files = [f for f in os.listdir('.') if f.endswith('.json')]
-    
-    print("\n==================================")
     print("    AVAILABLE EXPORT FILES        ")
-    print("==================================")
     
     if json_files:
         print("Found the following JSON files in this directory:")
@@ -190,8 +187,6 @@ def select_conversation(filepath):
                 item['content'] = item['title'].replace('Prompted ', '', 1)
             grouped[date_key]['messages'].insert(0, item)
         all_conversations = list(grouped.values())
-
-    print("\n==================================")
     print("   CHAT SUMMARIZER NAVIGATION     ")
     print("==================================")
     print("[1] View 10 most recent chats")
