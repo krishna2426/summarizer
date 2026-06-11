@@ -1,70 +1,39 @@
 import json
 import os
 import re
+import sys
 import datetime
+import argparse
 from google import genai
 
-# --- 1. Configuration ---
-try:
-    client = genai.Client()
-except Exception as e:
-    print("Error: Could not initialize Gemini Client. Make sure your GEMINI_API_KEY environment variable is set.")
-    exit(1)
+# --- 1. Configuration Constants ---
+__version__ = "1.2.0"
+DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_OUTPUT_DIR = "project_states"
 
-# --- 2. Dynamic File Scanner ---
-def select_json_file():
-    """Scans the current directory for JSON files and lets the user pick one."""
-    json_files = [f for f in os.listdir('.') if f.endswith('.json')]
-    print("    AVAILABLE EXPORT FILES        ")
+# --- 2. Advanced Multi-Item Format Detector ---
+def is_gemini_takeout(conversations):
+    """Loosened detection: Scans multiple items to check if it's a Gemini export."""
+    if not isinstance(conversations, list):
+        return False
     
-    if json_files:
-        print("Found the following JSON files in this directory:")
-        for idx, filename in enumerate(json_files):
-            print(f"[{idx}] {filename}")
-        print(f"[{len(json_files)}] Enter a custom/relative file path manually")
-        
-        while True:
-            try:
-                choice = input("\nSelect a file number to load (or 'q' to quit): ").strip()
-                if choice.lower() == 'q':
-                    exit(0)
-                choice_int = int(choice)
-                if 0 <= choice_int < len(json_files):
-                    return json_files[choice_int]
-                elif choice_int == len(json_files):
-                    break
-                else:
-                    print("Invalid selection. Please choose a valid number.")
-            except ValueError:
-                print("Please enter a valid number.")
-                
-    else:
-        print("No .json files automatically detected in this folder.")
-        
-    while True:
-        path = input("\nEnter the path or filename of your JSON export file: ").strip()
-        if path.lower() == 'q':
-            exit(0)
-        if os.path.exists(path):
-            return path
-        else:
-            print(f"Error: File '{path}' could not be found. Try again (or 'q' to quit).")
+    # Check up to the first 5 items for the Gemini Takeout signature
+    for item in conversations[:5]:
+        if isinstance(item, dict) and str(item.get('title', '')).startswith('Prompted'):
+            return True
+    return False
 
-# --- 3. Recursive Text Hunter ---
+# --- 3. Recursive Text Scraper ---
 def find_real_text(node):
-    """Digs through JSON to find real human strings, ignoring metadata and IDs."""
+    """Isolates real human dialogue strings from structural UUIDs and metadata."""
     if isinstance(node, str):
         node_stripped = node.strip()
-        
-        if re.match(r'^\d{4}-\d{2}-\d{2}T', node_stripped):
-            return ""
-        if "uploaded:image_" in node_stripped or "contentFetchId" in node_stripped:
-            return ""
+        if re.match(r'^\d{4}-\d{2}-\d{2}T', node_stripped): return ""
+        if "uploaded:image_" in node_stripped or "contentFetchId" in node_stripped: return ""
             
         clean_hex_check = node_stripped.replace('-', '').replace('_', '').replace(' ', '')
         if re.match(r'^[a-fA-F0-9]+$', clean_hex_check) and len(clean_hex_check) >= 8:
             return ""
-            
         return node
         
     elif isinstance(node, list):
@@ -83,100 +52,160 @@ def find_real_text(node):
                 continue
             txt = find_real_text(val)
             if txt.strip(): return txt
-            
     return ""
 
-# --- 4. Advanced Title Generator ---
+# --- 4. Title & Content Extraction ---
 def get_clean_title(chat, index):
-    """Extracts a clean title by prioritizing actual message arrays first."""
     title = chat.get('title', '').strip()
-    
     if title and title.lower() != 'untitled chat':
         return title
         
     messages = chat.get('chat_messages', chat.get('messages', []))
-    
     raw_text = ""
     if messages and isinstance(messages, list):
         raw_text = find_real_text(messages[0])
-        
     if not raw_text.strip():
         raw_text = find_real_text(chat)
     
     if raw_text:
         text = raw_text.strip()
         text = re.sub(r'^(user|model|human|assistant|system)\s*:\s*', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'^[\{\[\s"\'`#\-\*]+', '', text)
-        
-        text = text.strip()
+        text = re.sub(r'^[\{\[\s"\'`#\-\*]+', '', text).strip()
         if text:
             words = text.split()
             generated_title = " ".join(words[:6])
-            if len(words) > 6:
-                generated_title += "..."
-            return f"[Auto] {generated_title}"
+            return f"[Auto] {generated_title}..." if len(words) > 6 else f"[Auto] {generated_title}"
             
     return f"Empty Chat #{index + 1}"
 
-# --- 5. Multi-Format Chat Parser ---
 def extract_chat_text(selected_chat):
-    """Auto-detects the JSON format and extracts the conversation text."""
     conversation_text = ""
-    
     if 'mapping' in selected_chat:
         mapping = selected_chat.get('mapping', {})
         for node_id, node_data in mapping.items():
             message = node_data.get('message')
             if message:
                 role = message.get('author', {}).get('role', 'unknown')
-                content_type = message.get('content', {}).get('content_type', '')
-                if content_type == 'text':
-                    parts = message.get('content', {}).get('parts', [])
-                    text = "".join(parts)
+                if message.get('content', {}).get('content_type', '') == 'text':
+                    text = "".join(message.get('content', {}).get('parts', []))
                     if role in ['user', 'assistant'] and text.strip():
                         conversation_text += f"{role.upper()}: {text}\n\n"
                         
     elif 'chat_messages' in selected_chat:
-        messages = selected_chat.get('chat_messages', [])
-        for msg in messages:
-            role = msg.get('sender', 'unknown')
-            text = msg.get('text', '')
-            if text.strip():
-                conversation_text += f"{role.upper()}: {text}\n\n"
+        for msg in selected_chat.get('chat_messages', []):
+            role, text = msg.get('sender', 'unknown'), msg.get('text', '')
+            if text.strip(): conversation_text += f"{role.upper()}: {text}\n\n"
                 
     elif 'messages' in selected_chat or isinstance(selected_chat, dict):
         messages = selected_chat.get('messages', [selected_chat])
         for msg in messages:
             role = msg.get('role', 'unknown')
             content = find_real_text(msg)
-            if content.strip():
-                conversation_text += f"{role.upper()}: {content}\n\n"
-    elif 'history' in selected_chat:
-        for msg in selected_chat.get('history', []):
-            role = msg.get('author_role', 'unknown')
-            text = msg.get('text_body', '')
-            if text.strip():
-                conversation_text += f"{role.upper()}: {text}\n\n"
-    else:
-        print("Warning: Unrecognized chat format. Extracted text may be incomplete.")
-        
+            if content.strip(): conversation_text += f"{role.upper()}: {content}\n\n"
     return conversation_text
 
-# --- 6. Interactive Menu ---
-def select_conversation(filepath):
-    """Provides an interactive menu and returns the chat text AND the title."""
-    try:
-        with open(filepath, 'r', encoding='utf-8') as file:
-            all_conversations = json.load(file)
-    except Exception as e:
-        print(f"\nError reading '{filepath}': {e}")
-        exit(1)
+# --- 5. Interactive Mode Fallbacks ---
+def interactive_select_file():
+    json_files = [f for f in os.listdir('.') if f.endswith('.json')]
+    print("\n==================================")
+    print("    AVAILABLE EXPORT FILES        ")
+    print("==================================")
+    if json_files:
+        for idx, filename in enumerate(json_files):
+            print(f"[{idx}] {filename}")
+        print(f"[{len(json_files)}] Enter custom file path manually")
+        while True:
+            try:
+                choice = input("\nSelect a file number (or 'q' to quit): ").strip()
+                if choice.lower() == 'q': sys.exit(0)
+                choice_int = int(choice)
+                if 0 <= choice_int < len(json_files): return json_files[choice_int]
+                if choice_int == len(json_files): break
+            except ValueError: pass
+    return input("\nEnter JSON export file path: ").strip()
 
+def interactive_select_conversation(all_conversations):
+    print("\n[1] View 10 most recent chats\n[2] Search chats by keyword")
+    menu_choice = input("\nSelect an option: ").strip()
+    
+    visible_chats = all_conversations[:10] if menu_choice == '1' else []
+    if menu_choice == '2':
+        keyword = input("Enter keyword: ").lower()
+        for chat in all_conversations:
+            if keyword in get_clean_title(chat, 0).lower() or keyword in find_real_text(chat).lower():
+                visible_chats.append(chat)
+        visible_chats = visible_chats[:15]
+        
+    if not visible_chats:
+        print("No matching conversations found.")
+        return None, None
+
+    for index, chat in enumerate(visible_chats):
+        print(f"[{index}] {get_clean_title(chat, index)}")
+        
+    while True:
+        try:
+            choice = input("\nEnter chat number to summarize: ").strip()
+            choice_int = int(choice)
+            if 0 <= choice_int < len(visible_chats):
+                sel = visible_chats[choice_int]
+                return extract_chat_text(sel), get_clean_title(sel, choice_int)
+        except ValueError: pass
+
+# --- 6. Unified Inference Interface ---
+def call_llm_backend(provider, prompt):
+    """Dispatches the prompt to the selected LLM provider backend."""
+    if provider.lower() == "gemini":
+        try:
+            # Simple custom CLI loading indicator
+            print("Sending request to Gemini...", end="", flush=True)
+            client = genai.Client()
+            response = client.models.generate_content(
+                model=DEFAULT_MODEL,
+                contents=prompt,
+            )
+            print(" Done!")
+            return response.text
+        except Exception as e:
+            print(f"\nGemini Client Error: {e}")
+            sys.exit(1)
+            
+    elif provider.lower() in ["openai", "anthropic", "ollama"]:
+        print(f"\nBackend Error: '{provider}' integration is structured but pending package installation.")
+        print("Please configure your preferred community SDK wrapper here.")
+        sys.exit(1)
+    else:
+        print(f"\nUnsupported provider: {provider}")
+        sys.exit(1)
+
+# --- 7. Execution Core ---
+def main():
+    parser = argparse.ArgumentParser(description="AI Project State Explorer & Summary Extraction CLI.")
+    parser.add_argument("--version", "-v", action="version", version=f"%(progs)s v{__version__}")
+    parser.add_argument("--file", "-f", help="Path to target chat export JSON file")
+    parser.add_argument("--output-dir", "-o", default=DEFAULT_OUTPUT_DIR, help="Directory path to write generated files")
+    parser.add_argument("--provider", "-p", default="gemini", choices=["gemini", "openai", "anthropic", "ollama"], help="LLM backend choice")
+    
+    args = parser.parse_args()
+    
+    # 1. Target File Resolution
+    target_file = args.file if args.file else interactive_select_file()
+    if not target_file or not os.path.exists(target_file):
+        print(f"Error: File '{target_file}' does not exist.")
+        sys.exit(1)
+        
+    # 2. File Parsing & Multi-Item Gemini Normalization Wrapper
+    try:
+        with open(target_file, 'r', encoding='utf-8') as f:
+            all_conversations = json.load(f)
+    except Exception as e:
+        print(f"Error reading or parsing JSON file: {e}")
+        sys.exit(1)
+        
     if isinstance(all_conversations, dict):
         all_conversations = [all_conversations]
 
-    # Gemini Takeout Fix
-    if all_conversations and isinstance(all_conversations[0], dict) and str(all_conversations[0].get('title', '')).startswith('Prompted'):
+    if is_gemini_takeout(all_conversations):
         grouped = {}
         for item in all_conversations:
             date_key = item.get('time', 'Unknown_Date')[:10]
@@ -187,75 +216,15 @@ def select_conversation(filepath):
                 item['content'] = item['title'].replace('Prompted ', '', 1)
             grouped[date_key]['messages'].insert(0, item)
         all_conversations = list(grouped.values())
-    print("   CHAT SUMMARIZER NAVIGATION     ")
-    print("==================================")
-    print("[1] View 10 most recent chats")
-    print("[2] Search chats by keyword")
-    print("[q] Quit")
-    
-    menu_choice = input("\nSelect an option: ").strip()
-    
-    if menu_choice.lower() == 'q':
-        exit(0)
-        
-    if menu_choice == '1':
-        visible_chats = all_conversations[:10]
-        
-    elif menu_choice == '2':
-        keyword = input("Enter a keyword to search for (e.g., 'Subway'): ").lower()
-        visible_chats = []
-        
-        for chat in all_conversations:
-            generated_title = get_clean_title(chat, 0).lower()
-            msg_snippet = find_real_text(chat).lower()
-                
-            if keyword in generated_title or keyword in msg_snippet:
-                visible_chats.append(chat)
-                
-        if not visible_chats:
-            print(f"\nNo conversations found matching '{keyword}'.")
-            return select_conversation(filepath)
-            
-        visible_chats = visible_chats[:15]
-    else:
-        print("Invalid option. Restarting menu...")
-        return select_conversation(filepath)
 
-    print(f"\n--- Matching Conversations (Showing top {len(visible_chats)}) ---")
-    for index, chat in enumerate(visible_chats):
-        clean_title = get_clean_title(chat, index)
-        print(f"[{index}] {clean_title}")
-    print("-" * 40)
-    
-    while True:
-        try:
-            choice = input("Enter the number of the chat to summarize (or 'b' to go back): ")
-            if choice.lower() == 'b':
-                return select_conversation(filepath)
-                
-            choice = int(choice)
-            if 0 <= choice < len(visible_chats):
-                selected_chat = visible_chats[choice]
-                final_title = get_clean_title(selected_chat, choice)
-                print(f"\nExtracting data from: {final_title}...")
-                
-                # RETURN BOTH TEXT AND TITLE NOW
-                return extract_chat_text(selected_chat), final_title
-            else:
-                print("Invalid number. Please select a valid number.")
-        except ValueError:
-            print("Please enter a valid integer.")
+    # 3. Conversation Text Extraction
+    chat_text, chat_title = interactive_select_conversation(all_conversations)
+    if not chat_text:
+        print("Exiting: No conversation content selected.")
+        sys.exit(0)
 
-# --- 7. AI Summarization ---
-def generate_state_file(chat_text, chat_title, source_filename):
-    """Sends text to Gemini and saves uniquely named Markdown file."""
-    if not chat_text.strip():
-        print("Error: No text extracted. Cannot generate a summary.")
-        return
-
-    print("Sending to Gemini for summarization... (This might take a few seconds)")
-    
-    prompt = f"""
+    # 4. Prompt Synthesis & Execution
+    generation_prompt = f"""
     Analyze the following chat history and generate a strict Markdown state file.
     Do not include any conversational filler. Use this exact structure:
     
@@ -268,39 +237,25 @@ def generate_state_file(chat_text, chat_title, source_filename):
     {chat_text}
     """
     
+    markdown_output = call_llm_backend(args.provider, generation_prompt)
+    
+    # 5. Protected File Write Operation
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        
-        # 1. Clean the chat title so it's safe for Windows files (removes brackets, colons, etc.)
+        os.makedirs(args.output_dir, exist_ok=True)
         safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', chat_title)
         safe_title = re.sub(r'_+', '_', safe_title).strip('_')
-        
-        # 2. Get the original JSON filename without the '.json' part
-        base_json_name = os.path.splitext(os.path.basename(source_filename))[0]
-        
-        # 3. Get the current time (HourMinuteSecond)
+        base_name = os.path.splitext(os.path.basename(target_file))[0]
         timestamp = datetime.datetime.now().strftime("%H%M%S")
         
-        # 4. Stitch it all together! Limiting title length so it isn't massive.
-        new_filename = f"{base_json_name}_{safe_title[:30]}_{timestamp}.md"
+        final_filename = os.path.join(args.output_dir, f"{base_name}_{safe_title[:30]}_{timestamp}.md")
         
-        with open(new_filename, 'w', encoding='utf-8') as f:
-            f.write(response.text)
-        print(f"\nSuccess! State file successfully saved as '{new_filename}'")
+        with open(final_filename, 'w', encoding='utf-8') as f:
+            f.write(markdown_output)
+        print(f"Success! State file safely written to: {final_filename}")
         
-    except Exception as e:
-        print(f"\nError generating content: {e}")
+    except IOError as e:
+        print(f"File System Error: Failed to write state file output to directory. Detail: {e}")
+        sys.exit(1)
 
-# --- Main Execution ---
 if __name__ == "__main__":
-    # Get the file name
-    chosen_file = select_json_file()
-    
-    # Extract text AND the clean title
-    chat_text, chat_title = select_conversation(chosen_file)
-    
-    # Generate the file with all three pieces of info
-    generate_state_file(chat_text, chat_title, chosen_file)
+    main()
