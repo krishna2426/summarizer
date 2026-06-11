@@ -1,8 +1,3 @@
-Here is a complete, professional `README.md` template tailored exactly to your backend parser script. You can drop this directly into your repository.
-
----
-
-```markdown
 # AI Project State Explorer & Summarizer
 
 An intelligent command-line utility that processes large conversational exports from major AI assistants (including Claude, ChatGPT, and Google Takeout Gemini) and leverages the Gemini API to distill them into structured project tracking blueprints (`.md`).
